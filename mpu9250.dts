@@ -1,0 +1,43 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "ti,beaglebone", "ti,beaglebone-black";
+
+    fragment@0
+    {
+
+        target = <&spi1>;
+
+        __overlay__
+        {
+
+            status = "okay";
+
+            pinctrl-names = "default";
+
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            mpu9250@0
+            {
+
+                compatible = "raj,mpu9250";
+
+                /*
+                    | CS Number | Physical Pin |
+                    | --------- | ------------ |
+                    | CS0       | P9_28        |
+                    | CS1       | P9_42        |
+                */
+                
+                reg = <0>;  // means use chipselect zero
+
+                spi-max-frequency = <1000000>;
+
+                interrupt-parent = <&gpio1>;
+                interrupts = <28 0>;
+            };
+        };
+    };
+};
