@@ -18,7 +18,7 @@
 
 #define WAKE_UP_LABEL			"wake_up_gpio"
 #define WAKE_UP_IRQ_LABEL		"wake_up_irq"
-#define WAKE_UP_GPIO    		28
+#define WAKE_UP_GPIO    		60
 typedef struct mpu9250_kernel_driver_t
 
 {
@@ -50,10 +50,18 @@ static mpu9250_t 				mpu9250_device_data;
 /*================================================================
 						HELPER FUCNTIONS
 =================================================================*/
+static void deinit_mpu9250(mpu9250_kernel_driver_t *mpu9250_spi_dvc)
+{
+	pr_info("In deinit_mpu9250 \n");
+	free_irq(mpu9250_spi_dvc->gpio_irq, (void*)&(mpu9250_spi_dvc->irq_args));
+	gpio_free(mpu9250_spi_dvc->gpio_num);
+}
+
 static void deinit_device(struct mpu9250_kernel_driver_t *mpu9250_driver)
 {
 	pr_info(" In deinit_device \n");
 
+	deinit_mpu9250(&mpu9250_dev);
 	cdev_del(&mpu9250_driver->cdev);
 	device_destroy(mpu9250_driver->class, mpu9250_driver->dev_num);
 	class_destroy(mpu9250_driver->class);

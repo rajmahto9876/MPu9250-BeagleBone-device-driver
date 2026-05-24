@@ -1,10 +1,3 @@
----
-title: BeagleBone MPU9250 - SPI
-date: 2026-05-21
-categories: [Projects]
-tags: [projects, mpu9250, spi]
----
-
 # MPU9250 SPI Kernel Driver for BeagleBone
 
 This repository contains a Linux kernel module that exposes an MPU9250 IMU over SPI as a character device. The driver hides low-level SPI register handling and provides a simple user-space API via `ioctl` and a well-defined `mpu9250_t` data structure.
@@ -14,6 +7,7 @@ This repository contains a Linux kernel module that exposes an MPU9250 IMU over 
 - A character device at `/dev/mpu9250_device`
 - An `ioctl` command to request the latest sensor sample
 - A kernel-side helper API for initialization, register read/write, and data collection
+- An interrupt interface using the MPU9250 INT pin and a kernel ISR
 - A model for SPI-based sensor integration using device tree matching and `spi_driver`
 
 ## Hardware wiring (BeagleBone Black SPI1)
@@ -29,6 +23,18 @@ This repository contains a Linux kernel module that exposes an MPU9250 IMU over 
 | INT         | P9_12                | Interrupt / Data Ready   |
 
 > Warning: MPU9250 is a 3.3V device. Do not drive it with 5V signals without proper level shifting.
+
+## IRQ / interrupt interface
+
+The driver also supports the MPU9250 `INT` pin as a hardware interrupt input. The interrupt pin is configured as a GPIO input in the kernel and connected to an IRQ handler:
+
+- `INT` pin wired to BeagleBone pin `P9_12` (GPIO1_28 / `WAKE_UP_GPIO` / gpio number `60`)
+- The driver calls `gpio_request()` and `gpio_direction_input()` for the interrupt GPIO
+- The GPIO is converted to an IRQ via `gpio_to_irq()`
+- `request_irq()` is used with `IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING`
+- The ISR `wake_up_isr()` is registered to handle interrupt events
+
+This lets the kernel driver detect MPU9250 data-ready transitions from the sensor and respond to interrupt activity.
 
 ## SPI settings
 
