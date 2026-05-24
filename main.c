@@ -5,7 +5,7 @@
 #include <linux/device.h>
 #include <linux/uaccess.h>
 #include <linux/ioctl.h>
-
+#include <linux/gpio.h>
 
 #include "mpu9250_helper.h"
 /*================================================================
@@ -15,14 +15,22 @@
 #define MPU9250_CLASS_NAME    "mpu9250_class"
 #define MPU9250_DEVICE_NAME   "mpu9250_device"
 
-struct mpu9250_driver_t
+
+#define WAKE_UP_LABEL			"wake_up_gpio"
+#define WAKE_UP_IRQ_LABEL		"wake_up_irq"
+#define WAKE_UP_GPIO    		28
+typedef struct mpu9250_kernel_driver_t
+
 {
     struct spi_device   *mpu9250_client;
     dev_t 				dev_num;
     struct 				cdev cdev;
     struct class 		*class;
     struct device 		*device;
-};
+    int 				gpio_num;
+    int 				gpio_irq;
+    int 				irq_args;
+} mpu9250_kernel_driver_t;
 
 /*
 	SPI GPIO IN USE:-
@@ -37,12 +45,12 @@ struct mpu9250_driver_t
 	| INT     | P9_12 (GPIO1_28 example) |
 */
 
-static struct mpu9250_driver_t mpu9250_dev;
-static mpu9250_t mpu9250_device_data;
+static mpu9250_kernel_driver_t 	mpu9250_dev;
+static mpu9250_t 				mpu9250_device_data;		
 /*================================================================
 						HELPER FUCNTIONS
 =================================================================*/
-static void deinit_device(struct mpu9250_driver_t *mpu9250_driver)
+static void deinit_device(struct mpu9250_kernel_driver_t *mpu9250_driver)
 {
 	pr_info(" In deinit_device \n");
 
@@ -50,6 +58,12 @@ static void deinit_device(struct mpu9250_driver_t *mpu9250_driver)
 	device_destroy(mpu9250_driver->class, mpu9250_driver->dev_num);
 	class_destroy(mpu9250_driver->class);
 	unregister_chrdev_region(mpu9250_driver->dev_num, 1);
+}
+
+irqreturn_t wake_up_isr(int flag, void *args)
+{
+	pr_info("In Wake_ up_isr");
+	return IRQ_HANDLED;
 }
 
 /*================================================================
@@ -82,8 +96,6 @@ static int fops_open(struct inode *pInode, struct file *pFile)
 static int fops_release(struct inode *pInode, struct file *pFile)
 {
 	pr_info("in fops_release \n");
-	deinit_device(&mpu9250_dev);
-
 	return 0;
 }
 
@@ -133,7 +145,7 @@ static struct file_operations fops =
 	.unlocked_ioctl = fops_unlocked_ioctl,
 };
 
-static int init_device(struct mpu9250_driver_t *mpu9250_driver)
+static int init_device(struct mpu9250_kernel_driver_t *mpu9250_driver)
 {
 	int ret = 0;
 	pr_info("In init_device \n");
@@ -288,10 +300,54 @@ int mpu9250_write_block_data(int reg, const u8 *data, u8 size)
     return ret;
 }
 
-static int initilse_mpu9250(void)
+static int initilse_mpu9250(mpu9250_kernel_driver_t *mpu9250_spi_dvc)
 {
+	int ret = 0;
 	pr_info ("initilse_mpu9250 \n");
-	return mpu9250_Init();
+	/*
+		Initilisation Interrupt Gpio
+	*/
+
+	ret = mpu9250_Init();
+	if(ret!= 0)
+	{
+		pr_err("mpu9250_Init Failed \n");
+		goto out;
+	}
+
+	mpu9250_spi_dvc->irq_args = 0xDEADBEEF;
+	mpu9250_spi_dvc->gpio_num = WAKE_UP_GPIO;
+	ret = gpio_request(mpu9250_spi_dvc->gpio_num, WAKE_UP_LABEL);
+    if (ret < 0)
+    {
+		pr_err("%s: failed to request WAKE_UP_GPIO: %d\n", __func__, ret);
+		goto out;
+	}
+
+	gpio_direction_input(mpu9250_spi_dvc->gpio_num);
+
+    /* IRQ setup */
+    mpu9250_spi_dvc->gpio_irq = gpio_to_irq(mpu9250_spi_dvc->gpio_num);
+    ret = request_irq(mpu9250_spi_dvc->gpio_irq, wake_up_isr,
+     					IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, WAKE_UP_IRQ_LABEL, 
+     					(void*)&(mpu9250_spi_dvc->irq_args)
+     				);
+
+    if (ret)
+    {
+		pr_err("%s: failed to request WAKE_UP_GPIO IRQ: %d\n", __func__, ret);
+		goto gpio_irq_unassign;
+	}
+
+	pr_info("Intilisation Successful\n");
+	ret = 0;
+	return ret;
+
+gpio_irq_unassign:
+	free_irq(mpu9250_spi_dvc->gpio_irq, (void*)&(mpu9250_spi_dvc->irq_args));
+
+out:
+	return ret;
 }
 
 static int mpu9250_probe(struct spi_device *mpu9250_spi)
@@ -307,7 +363,7 @@ static int mpu9250_probe(struct spi_device *mpu9250_spi)
 		return ret;
 	}
 
-	ret = initilse_mpu9250();
+	ret = initilse_mpu9250(&mpu9250_dev);
 	if(ret!= 0)
 	{
 		pr_err("initilse_mpu9250 Error\n");
@@ -321,6 +377,7 @@ static int mpu9250_probe(struct spi_device *mpu9250_spi)
 static int mpu9250_remove(struct spi_device *mpu9250_spi)
 {
 	pr_info("In Remove\n");
+	deinit_device(&mpu9250_dev);
 	return 0;
 }
 
